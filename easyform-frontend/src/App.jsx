@@ -9,6 +9,55 @@ const API_BASE = (
 ).replace(/\/$/, "");
 import translations from "./translations";
 
+// Remove genuine duplicate questions without merging
+// separate people, account holders or other repeated entries.
+const deduplicateGuidedFields = (inputFields) => {
+  if (!Array.isArray(inputFields)) return [];
+
+  const seen = new Set();
+
+  const normalize = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .replace(/\s+/g, " ");
+
+  const isRepeatableSlot = (field) => {
+    const identity = normalize(
+      `${field.name || ""} ${field.label || ""} ${field.help || ""}`
+    );
+
+    return (
+      /\b(holder|nominee|beneficiary|guardian|witness|dependent|co applicant|joint|partner|director|reference|insured|applicant)\b/.test(identity) ||
+      /\b\d+\b/.test(identity)
+    );
+  };
+
+  return inputFields.filter((field) => {
+    if (!field || typeof field !== "object") return false;
+
+    const label = normalize(field.label);
+    const help = normalize(field.help);
+    const section = normalize(field.section);
+    const audience = normalize(field.audience || "applicant");
+
+    if (!label) return true;
+
+    // Never merge fields belonging to separate people or slots.
+    if (isRepeatableSlot(field)) return true;
+
+    const signature = `${label}|${help}|${section}|${audience}`;
+
+    if (seen.has(signature)) {
+      return false;
+    }
+
+    seen.add(signature);
+    return true;
+  });
+};
+
 function App() {
   const [language, setLanguage] = useState("English");
   const t = translations[language] || translations.English;
@@ -148,8 +197,8 @@ function App() {
         setFormText(data.formText || "");
       }
       if (inputMode === "photo" && Array.isArray(data.fields)) {
-        setFields(data.fields);
-      }
+  setFields(deduplicateGuidedFields(data.fields));
+}
 
       setResult(data);
     } catch (err) {
@@ -190,14 +239,19 @@ function App() {
       if (!response.ok) {
         throw new Error(data.message || t.extractionError);
       }
+if (!Array.isArray(data.fields) || data.fields.length === 0) {
+  throw new Error(t.noFields);
+}
 
-      if (!Array.isArray(data.fields) || data.fields.length === 0) {
-        throw new Error(t.noFields);
-      }
+const uniqueFields = deduplicateGuidedFields(data.fields);
 
-      setFields(data.fields);
-      setCurrentFieldIndex(0);
-      setShowFillForm(true);
+if (uniqueFields.length === 0) {
+  throw new Error(t.noFields);
+}
+
+setFields(uniqueFields);
+setCurrentFieldIndex(0);
+setShowFillForm(true);
     } catch (err) {
       console.error("Field extraction error:", err);
       setFillError(err.message || t.extractionError);
